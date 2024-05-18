@@ -1,0 +1,272 @@
+//Notes
+Currently not including Budgets on Change Orders 
+  06-07-01 - Added Filter by Job type
+  03/16/2016 - TR 399162 - fix for other field- Issue in pulling Total committed.'bCtrByDet' is not in use
+//End Notes
+
+//Database
+
+//End Database
+
+
+//Title
+Job Cost Report Detail 
+Select rtrim(IsNull(sBriefDesc,'')) + ' (' + rtrim(sCode) + ')' from job j where rtrim(sCode) > ' '  #conditions# order by sBriefDesc; 
+//end title
+
+
+//Select
+SELECT                             	/* main query */
+  main.category, 			[1]  Category 
+  main.catcode,				[2]  Category code 
+  sum(main.budget), 			[3]  Approved budget  
+  sum(main.newbudget),			[4]  Revised budget  
+  sum(main.sub),			[5]  Contracts CO's  
+  sum(main.other),			[6]  AP JE & Other
+  0,					[7]  Total committed costs, 	FORMULA = [5] + [6] 
+  0,					[8]  Uncommitted balance, 	FORMULA = [4] - [7] 
+  sum(main.mtd),			[9]  Current period costs 
+  sum(main.ytd),			[10] Total costs-to-date 
+  0,					[11] Undisbursed budget balance 
+  0,					[12] Undisbursed contracted costs
+  0					[13] % Complete			FORMULA = 100 * [10] / [4] 
+FROM
+/* *****MAIN BELOW***** */ 
+(SELECT                             	/* job budget */
+  c.scode                                                                            as catcode,
+  #@@CATEGCODE# + ' ' + c.sdesc                                                      as category, 
+  jd.sbudget                                                                         as budget,
+  convert(numeric(12,2),jd.snewbudget)                                               as newbudget,
+  0                                                                                  as sub,
+  0                                                                                  as other,
+  0                                                                                  as mtd,
+  0                                                                                  as ytd
+  FROM category c, jobdetl jd, job j
+  WHERE (NOT c.iReptype = 2)
+  AND jd.hJob = j.hMy 
+  AND  j.iType = 65 /* 'JOB' itype */ 
+  AND jd.hCateg = c.hMy
+  AND (jd.blink = -1 or isnull(jd.hcontract, 0) = 0) 
+  #conditions#
+  and c.hchart = #@@hchart#
+ UNION ALL SELECT                             	/* SubContract budget */
+  c.scode                                                                            as catcode,
+  #@@CATEGCODE# + ' ' + c.sdesc                                                      as category, 
+  0                                                                                  as budget,
+  0                                                                                  as newbudget,
+  (jd.sbid)                                                                          as sub,
+  0                                                                                  as other,
+  0                                                                                  as mtd,
+  0                                                                                  as ytd
+  FROM category c, jobdetl jd, job j
+  WHERE (NOT c.iReptype = 2)
+  AND jd.hJob = j.hMy
+  AND jd.hCateg = c.hMy
+  AND (isnull(jd.hcontract, 0) <> 0)     /* Can be linked or not linked */
+  #conditions#
+  and c.hchart = #@@hchart#
+ UNION ALL SELECT  /* Trans */
+  c.scode                               as catcode,
+  #@@CATEGCODE# + ' ' + c.sdesc		as category,
+  0 					as budget,
+  0                                     as newbudget,
+  0                                     as sub,
+
+/* 	(if an expense, then
+		if charge or receipt, -amount
+		else amount
+	 if revenue, then
+		if payable or invoice, amount
+		else if journal entry or job cost adjustment and t.bIncomeJE is not -1, amount
+		else 0) 
+	- 
+	(if a contract 
+	(if an expense, then
+		if charge or receipt, -amount
+		else amount
+	 if revenue, then
+		if payable or invoice, amount
+		else if journal entry or job cost adjustment and t.bIncomeJE is not -1, amount
+		else 0)) 
+*/ 
+  case When c.iRepType = 1 Then     /*  Expense */ // what is iRepType
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End
+    
+    
+       - (case when (isnull(d.hContract,0) <> 0) then case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End else 0 end)   as other,
+
+/* expenses and revenues MTD */
+
+  (case when t.upostdate >= '#POSTFR#' then 
+  case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End  
+  else 0 end)           as mtd,
+
+/* *****REVIEW***** */ 
+  case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End as ytd
+/* *****END REVIEW***** */ 
+
+	FROM trans t , Job J , detail d, category c
+	WHERE d.hJob = J.hMy 
+        and isnull(d.hcateg,0)<>0
+        and isnull(d.hjob,0)<>0
+	AND d.hCateg = c.hMy
+	AND d.hInvOrRec = t.hMy
+	#conditions#
+	and c.hchart = #@@hchart#
+	AND t.upostdate  <= '#POSTTO#'
+	AND isnull(d.bret,0) = 0 AND isnull(t.retpay,0) = 0 
+	AND (t.iType = 3
+	 or (t.itype = 6 and NOT (isnull(d.hchkorchg, 0) BETWEEN 700000000 AND 799999999))
+	     or ((t.iType = 10 or t.itype = 17) AND
+	         (t.iType2 = 1 or t.iType2 = 1000) AND
+	         (isnull(t.bIncomeJE,0) <> -1) AND    	
+	         (isnull(c.iRepType,0) <> 2)))
+UNION ALL SELECT 					/* Trans to C/Os */
+  c.scode                               as catcode,
+  #@@CATEGCODE# + ' ' + c.sdesc		as category,
+  0                                     as budget,
+  0                                     as newbudget,
+  0                                     as sub,
+  case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End
+       - (case when isnull(d.hContract,0) <> 0 then 
+     		case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End else 0 end)  as other,
+  (case when t.upostdate >= '#postfr#' then 
+  case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End
+  else 0 end)          as mtd,
+  case When c.iRepType = 1 Then     /*  Expense */
+              case When t.itype in (6, 7) Then (-d.samount)
+                   Else d.samount 
+              End
+         When c.iRepType = 2 Then 0        /* Income */
+         Else Case When t.itype in (3) Then d.samount
+                   When t.itype in (10, 17) Then 
+					    Case when (isnull(t.bIncomeJE,0) <> -1) Then d.samount 
+					         Else 0 
+                        End
+              End
+    End                                                                as ytd
+	FROM trans t , Job co , detail d , Job J, category c
+	WHERE d.hJob = co.hMy 
+        and isnull(d.hjob,0)<>0
+        and isnull(d.hcateg,0)<>0
+	AND d.hInvOrRec = t.hMy
+	AND co.hJob = J.hMy
+	AND d.hCateg = c.hMy
+	#conditions#
+	and c.hchart = #@@hchart#
+	AND t.upostdate  <= '#POSTto#' 
+	AND isnull(d.bret,0) = 0 AND isnull(t.retpay,0) = 0 
+	AND (t.iType = 3
+	 or (t.itype = 6 and NOT (isnull(d.hchkorchg, 0) BETWEEN 700000000 AND 799999999))
+	     or ((t.iType = 10 or t.itype = 17) AND
+	         (t.iType2 = 1 or t.iType2 = 1000) AND
+  	         (isnull(t.bIncomeJE,0) <> -1) AND    	
+	         (isnull(c.iRepType,0) <> 2)))
+) Main
+Where 1 = 1
+Group By main.catcode, main.category
+ORDER BY 1
+//End Select
+
+<<INCLUDE CATEGORY_2.TXT>>
+
+//Columns 
+//Typ  Name      Head1        Head2        Head3        Head4          Show   Color Formul     Drill  Key     Width Totl Contr Mandt Lis Vald Defl Keep Suppress Maxlen
+T,     Category,            ,            ,            ,             ,  Y,      ,       ,        ,        ,     1500,   N,   ,     ,     ,   ,    ,    ,    ,         , 
+T,     Category,            ,            ,            ,             ,  N,      ,       ,        ,        ,     1500,   N,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,            ,    Approved,       Budget,  Y,      ,       ,        ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,            ,     Revised,       Budget,  Y,      ,       ,        ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,    Contract,           &,        C/O's,  Y,      ,       ,        ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,       AP JE,           &,        Other,  Y,      ,       ,        ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,       Total,       Costs,    Committed,  Y,      , [5]+[6],       ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,            , Uncommitted,      Balance,  Y,      , [4]-[7],       ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,      Current,     Period,        Costs,  Y,      ,        ,       ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,       Total,       Costs,      to Date,  Y,      ,        ,       ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            , Undisbursed,      Budget,      Balance,  Y,      , [4]-[10],      ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            , Undisbursed,  Contracted,      Costs,  Y,      , [7]-[10],      ,        ,      750,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+I,             ,            ,            ,           %,     Complete,  Y,      , 100*[10]/[4],  ,        ,      700,   Y,   ,     ,     ,   ,    ,    ,    ,         , 
+//End Columns
+
+//Filter
+//Type, DataTyp,Name,        Caption,        Key,  List,  Val1,                      Val2, Mandatory,Multi-Type, Title 
+C,      T,      HJOB,             Job,      ,      77,    "j.hMy = #HJOB#",              ,       ,       ,        Y,
+C,      T,      HPROP,       Property,      ,      61,    "j.hproperty = #HPROP#",       ,       ,       ,        Y,
+R,      M,      postfr:postto,Post Date mm/yy,    ,     ,"999 = 999",                    ,      Y,       ,        Y,                  
+L,      I,      STATUS,    Job Status,      ,      ^Scheduled^Inprogress^Completed^Cancelled^Closed, "j.iStatus  = CASE when '#STATUS#' = 'Scheduled' then 0 when '#STATUS#' = 'Inprogress' then 1 when '#STATUS#' = 'Completed' then 2 when '#STATUS#' = 'Cancelled' then 3 when '#STATUS#' = 'Closed' then 4 else j.istatus end",    ,       ,       ,   Y,  
+//End Filter

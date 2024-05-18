@@ -1,0 +1,57 @@
+/* 
+This report summarizes jobs by property and category. The following fields are provided: 
+	* Property code -- property.scode
+	* Property description -- property.sdesc
+	* Job code -- job.scode
+	* Job description -- job.sdesc 
+	* Job type -- jobtype.scode 
+	* Job type description -- jobtype.sdesc
+	* Category code -- category.scode
+	* Category description -- category.sdesc
+	* Approved budget -- 
+		jobstatus.istatus = 6 join on j.istatus = js.istatus
+	* Total contract 
+	* Pending contract
+
+The report provides the following calculated fields: 
+	* Revised budget
+	* Revised budget less total contract
+	* Total cash paid-to-date
+	* Revised budget less total cash paid-to-date
+	* % Complete 
+*/ 
+
+SELECT
+	J.scode AS 'Job Code',
+	J.sbriefdesc AS 'Job Description',
+    C.scode AS 'Category Code',
+    C.sdesc AS 'Category Description', 
+	JS.sstatus AS 'Status',
+	PROP.scode AS 'Property Code',
+	PROP.saddr1 AS 'Property Description',
+    (SUM(COALESCE(JD.sbudget, 0))) AS 'Approved Budget', 
+	(SUM(COALESCE(JD.sbudget, 0)) + SUM(COALESCE(JD.srevision, 0))) AS 'Revised Budget',
+    (SUM(COALESCE(JD.sbid, 0))) AS 'Contract Amount' 
+FROM JOB J
+JOIN JOBDETL JD ON J.hmy = JD.hjob
+JOIN JOBSTATUS JS ON JS.istatus = J.istatus
+JOIN PROPERTY PROP ON J.hproperty = PROP.hmy
+JOIN category c ON c.hmy = jd.hcateg 
+WHERE 
+	JS.istatus = 6
+    AND j.scode = '100690-ldam-0603'
+GROUP BY J.hmy, J.scode, C.scode, C.sdesc, JS.sstatus, J.sbriefdesc, PROP.scode, PROP.saddr1 
+ORDER BY J.scode
+
+SELECT * 
+FROM gldetail gl
+JOIN detail d ON d.hmy = gl.hdetail
+JOIN job j ON j.hmy = d.hjob
+JOIN category c ON c.hmy = d.hcateg
+WHERE j.scode = '100690-ldam-0603'
+AND c.scode = '2002226007'
+AND gl.itype = 10 
+AND d.hcontract = 0
+
+
+
